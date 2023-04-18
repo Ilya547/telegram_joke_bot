@@ -15,6 +15,7 @@ import org.telegram.telegrambots.bots.TelegramLongPollingBot;
 import org.telegram.telegrambots.meta.api.methods.commands.SetMyCommands;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageText;
+import org.telegram.telegrambots.meta.api.objects.Message;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.api.objects.commands.BotCommand;
 import org.telegram.telegrambots.meta.api.objects.commands.scope.BotCommandScopeDefault;
@@ -24,6 +25,7 @@ import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 
 import java.io.File;
 import java.io.IOException;
+import java.sql.Timestamp;
 import java.util.*;
 
 
@@ -31,6 +33,7 @@ import java.util.*;
 @Slf4j
 public class TelegramBot extends TelegramLongPollingBot {
 
+    private static final int MAX_JOKE_NUMBERS = 3773;
     @Autowired
     private BotConfig config;
 
@@ -95,6 +98,7 @@ public class TelegramBot extends TelegramLongPollingBot {
             } else {
                 switch (messageText) {
                     case "/start" -> {
+                        registerUser(update.getMessage());
                         showStart(chatId, update.getMessage().getChat().getFirstName());
                         try {
                             ObjectMapper objectMapper = new ObjectMapper();
@@ -108,7 +112,10 @@ public class TelegramBot extends TelegramLongPollingBot {
                     }
                     case "/settings" -> setSetting(chatId);
                     case "/help" -> prepareAndSendMessage(chatId, HELP_TEXT);
-                    case "/joke" -> getJoke(chatId);
+                    case "/joke" -> {
+                        registerUser(update.getMessage());
+                        getJoke(chatId);
+                    }
                     default -> commandNotFound(chatId);
                 }
             }
@@ -154,6 +161,23 @@ public class TelegramBot extends TelegramLongPollingBot {
         executeMessage(message);
     }
 
+    private void registerUser(Message msg) {
+        if (userRepository.findById(msg.getChatId()).isEmpty()) {
+            var chatId = msg.getChatId();
+            var chat = msg.getChat();
+
+            User user = new User();
+            user.setChatId(chatId);
+            user.setFirstName(chat.getFirstName());
+            user.setLastName(chat.getLastName());
+            user.setUserName(chat.getUserName());
+            user.setRegisteredAt(new Timestamp(System.currentTimeMillis()));
+
+            userRepository.save(user);
+            log.info("user saved: " + user);
+        }
+    }
+
     private void showStart(long chatId, String name) {
         String answer = EmojiParser.parseToUnicode(
                 "Hi, " + name + "! :smile:" + " Nice to meet you! I am a Simple Random Joke Bot created by Pavlov Ilya.\n");
@@ -161,10 +185,9 @@ public class TelegramBot extends TelegramLongPollingBot {
     }
 
     private void getJoke(long chatId) {
-        int r = (int) (Math.random() * 3773);
-        Optional<Joke> joke = jokeRepository.findById(r);
-        String answer = joke.get().getBody();
-        sendMessage(answer, chatId);
+        int r = (int) (Math.random() * MAX_JOKE_NUMBERS);
+        var joke = jokeRepository.findById(r);
+        joke.ifPresent(randomJoke -> sendMessage(randomJoke.getBody(), chatId));
     }
 
     private void prepareAndSendMessage(long chatId, String textToSend) {
